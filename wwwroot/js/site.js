@@ -81,28 +81,52 @@
     // ─────────────────────────────────────────────────────────────
     function renderProducts() {
         const $grid = $('#productsGrid').empty();
+
         const filtered = products.filter(p =>
             (selectedCategory === 'all' || p.category === selectedCategory) &&
             p.name.toLowerCase().includes(searchTerm.toLowerCase())
         );
+
         if (!filtered.length) {
             $grid.html('<p style="text-align:center;color:#999;padding:40px;">No products found.</p>');
-            renderPagination(0); return;
+            renderPagination(0);
+            return;
         }
-        const totalPages       = Math.ceil(filtered.length / itemsPerPage);
-        const paginated        = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-        paginated.forEach(p   => {
+
+        const totalPages = Math.ceil(filtered.length / itemsPerPage);
+
+        const paginated = filtered.slice(
+            (currentPage - 1) * itemsPerPage,
+            currentPage * itemsPerPage
+        );
+
+        paginated.forEach(p => {
             initSelection(p.id);
-            const $card = $('<div>').addClass('product-card').attr('data-productid', p.id);
-            $('<img>').attr('src', p.image).addClass('product-image').appendTo($card);
-            const $info = $('<div>').addClass('product-info').appendTo($card);
-            $('<div>').addClass('product-header')
+
+            const $card = $('<div>')
+                .addClass('product-card')
+                .attr('data-productid', p.id);
+
+            $('<img>')
+                .attr('src', p.image)
+                .addClass('product-image')
+                .appendTo($card);
+
+            const $info = $('<div>')
+                .addClass('product-info')
+                .appendTo($card);
+
+            $('<div>')
+                .addClass('product-header')
                 .append(`<div class="product-name">${p.name}</div>`)
                 .append(`<div class="product-price">Rs${p.price.toFixed(2)}</div>`)
                 .appendTo($info);
+
             loadVariants(p.id, $card, p);
+
             $card.appendTo($grid);
         });
+
         renderPagination(totalPages);
     }
 
@@ -489,6 +513,7 @@
     // COD FLOW
     // ─────────────────────────────────────────────────────────────
     function placeCODOrder(orderData) {
+        orderData.orderNumber = 'ORD-' + Date.now();
         $.ajax({
             url: '/home/PlaceOrder', type: 'POST', contentType: 'application/json',
             data: JSON.stringify(orderData),
@@ -502,11 +527,161 @@
         });
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // RAZORPAY FLOW
-    // Step 1 → Save order in DB  →  Step 2 → Create Razorpay order
-    // Step 3 → Open popup        →  Step 4 → Verify signature
-    // ─────────────────────────────────────────────────────────────
+
+    function startRazorpayPayment(orderData) {
+
+        const tempOrderNumber = 'ORD-' + Date.now();
+        orderData.orderNumber = tempOrderNumber;
+
+        // Step 1: Create Razorpay order — NO DB save yet
+        $.ajax({
+            url: '/home/CreateRazorpayOrder',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                orderNumber: tempOrderNumber,
+                amount: orderData.total
+            }),
+            success: function (rzpResp) {
+                if (!rzpResp || !rzpResp.razorpayOrderId) {
+                    alert('Unable to initiate payment. Please try again.');
+                    $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+                    return;
+                }
+
+                // Step 2: Open Razorpay popup
+                const rzp = new Razorpay({
+                    key: rzpResp.keyId,
+                    amount: rzpResp.amount * 100,  // paise
+                    currency: 'INR',
+                    name: 'Your Store Name',
+                    description: 'Order Payment',
+                    order_id: rzpResp.razorpayOrderId,
+                    prefill: {
+                        name: orderData.name,
+                        email: orderData.email,
+                        contact: orderData.phone
+                    },
+                    theme: { color: '#d81b60' },
+
+                    handler: function (rzpResponse) {
+
+                        // Step 1: Verify signature
+                        $.ajax({
+                            url: '/home/VerifyRazorpayPayment',
+                            type: 'POST',
+                            contentType: 'application/json',
+                            data: JSON.stringify({
+                                razorpayOrderId: rzpResponse.razorpay_order_id,
+                                razorpayPaymentId: rzpResponse.razorpay_payment_id,
+                                razorpaySignature: rzpResponse.razorpay_signature
+                            }),
+                            success: function (verifyResp) {
+                                if (verifyResp && verifyResp.success) {
+
+                                    // Step 2: Signature OK — save order to DB
+                                    orderData.paymentMode = 'razorpay';
+                                    orderData.razorpayOrderId = rzpResponse.razorpay_order_id;
+                                    orderData.razorpayPaymentId = rzpResponse.razorpay_payment_id;
+                                    orderData.razorpaySignature = rzpResponse.razorpay_signature;
+
+                                    $.ajax({
+                                        url: '/home/PlaceOrder',
+                                        type: 'POST',
+                                        contentType: 'application/json',
+                                        data: JSON.stringify(orderData),
+                                        success: function (saveResp) {
+                                            // ✅ Order saved — show success
+                                            showSuccess(saveResp.orderNumber ?? orderData.orderNumber);
+                                        },
+                                        error: function (xhr) {
+                                            alert('Payment done ✅ but order save failed.\nPayment ID: '
+                                                + rzpResponse.razorpay_payment_id
+                                                + '\nContact support with this ID.');
+                                            $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+                                        }
+                                    });
+
+                                } else {
+                                    alert('Payment verification failed. Contact support.');
+                                    $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+                                }
+                            },
+                            error: function (xhr) {
+                                alert('Verify error: ' + xhr.responseText);
+                                $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+                            }
+                        });
+                    },
+
+                    modal: {
+                        ondismiss: function () {
+                            // User closed popup — nothing saved ✅
+                            $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+                        }
+                    }
+                });
+
+                // Payment failed inside popup — nothing saved ✅
+                rzp.on('payment.failed', function (fail) {
+                    alert('Payment failed: ' + fail.error.description + '\nNo order was created. Please try again.');
+                    $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+                });
+
+                rzp.open();
+            },
+            error: function () {
+                alert('Error initiating payment. Please try again.');
+                $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+            }
+        });
+    }
+
+    // Step 3: Verify signature + save order to DB (only called on payment success)
+    function verifyAndPlaceOrder(rzpResponse, orderData) {
+        $('#placeOrderBtn').text('Saving your order...');
+
+        $.ajax({
+            url: '/home/VerifyAndPlaceOrder',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                razorpayOrderId: rzpResponse.razorpay_order_id,
+                razorpayPaymentId: rzpResponse.razorpay_payment_id,
+                razorpaySignature: rzpResponse.razorpay_signature,
+                order: {
+                    orderNumber: orderData.orderNumber,
+                    name: orderData.name,
+                    email: orderData.email,
+                    phone: orderData.phone,
+                    address: orderData.address,
+                    city: orderData.city,
+                    pincode: orderData.pincode,
+                    total: orderData.total,
+                    paymentMode: 'razorpay',
+                    items: orderData.Items
+                }
+            }),
+            success: function (resp) {
+                if (resp && resp.success) {
+                    showSuccess(resp.orderNumber);
+                } else {
+                    // Payment went through but order save failed
+                    alert('Payment was successful but order could not be saved.\nPayment ID: ' +
+                        rzpResponse.razorpay_payment_id +
+                        '\nPlease contact support with this Payment ID.');
+                    $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+                }
+            },
+            error: function () {
+                alert('Payment was successful but we could not save your order.\nPayment ID: ' +
+                    rzpResponse.razorpay_payment_id +
+                    '\nPlease contact support with this Payment ID.');
+                $('#placeOrderBtn').prop('disabled', false).text('Place Order');
+            }
+        });
+    }
+
     function placeOrderThenRazorpay(orderData) {
         // New flow: Create Razorpay order first, complete payment, then save order to API only if payment verified
         $.ajax({
@@ -595,8 +770,9 @@
 
                 rzp.open();
             },
-            error: function () {
-                alert('Error initiating payment. Please try again.');
+            error: function (xhr, status, error) {
+                console.error('CreateRazorpayOrder failed', status, error, xhr.responseText);
+                alert('Error initiating payment.\n' + (xhr.responseText || error || status));
                 $('#placeOrderBtn').prop('disabled', false).text('Place Order');
             }
         });

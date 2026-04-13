@@ -39,5 +39,9 @@
 
 
 @section Scripts {
-    
+    <!-- ✅ Razorpay SDK MUST come BEFORE site.js -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+    <!-- Your JS file comes AFTER -->
+    <script src="~/js/site.js"></script>
 }
