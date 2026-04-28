@@ -1,0 +1,15 @@
+@model Ecommerce.Models.SiteHeaderModel
+
+<div class="site-header-component">
+    @if (!string.IsNullOrWhiteSpace(Model?.HeaderHtml))
+    {
+        @Html.Raw(Model.HeaderHtml)
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Model?.HeroHtml))
+    {
+        <div class="site-hero">
+            @Html.Raw(Model.HeroHtml)
+        </div>
+    }
+</div>

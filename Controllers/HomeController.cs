@@ -37,10 +37,14 @@ namespace Ecommerce.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCategories()
             => await ProxyGet($"{ApiBase}/api/Categories/categories");
-
+      
         [HttpGet]
         public async Task<IActionResult> GetProducts()
             => await ProxyGet($"{ApiBase}/api/Categories/products");
+
+        [HttpGet]
+        public async Task<IActionResult> GetProductCategoryMap()
+            => await ProxyGet($"{ApiBase}/api/Categories/productCategoryMap");
 
         [HttpGet]
         public async Task<IActionResult> GetProductsId(int id)
@@ -65,6 +69,11 @@ namespace Ecommerce.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateRazorpayOrder([FromBody] JsonElement body)
             => await ProxyPostRaw($"{ApiBase}/api/Razorpay/CreateOrder", body.GetRawText());
+
+        // JS expects /home/VerifyRazorpayPayment — proxy to API VerifyPayment
+        [HttpPost]
+        public async Task<IActionResult> VerifyRazorpayPayment([FromBody] JsonElement body)
+            => await ProxyPostRaw($"{ApiBase}/api/Razorpay/VerifyPayment", body.GetRawText());
 
         // Razorpay Step 2 — Verify payment + save order to DB (only on success)
         [HttpPost]

@@ -1,8 +1,15 @@
+using Ecommerce.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 builder.Services.AddHttpClient();
+//builder.Services.AddSingleton<ContentService>();
+builder.Services.AddScoped<ContentService>();
 
 var app = builder.Build();
 
